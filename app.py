@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+from datetime import date
 
 
 MYSQL_USER = "root"
@@ -257,7 +258,7 @@ st.title("🚓Police checkPost Logs Dashboard")
 st.markdown("---")
 
 st.sidebar.header("Access Panel")
-page = st.sidebar.radio("Go to", ["Dashboard Overview", "Analytics & Reports"])
+page = st.sidebar.radio("Go to", ["Dashboard Overview","Search Logs", "Analytics & Reports"])
 st.sidebar.markdown("---")
 st.sidebar.info("This dashboard provides basic insights into traffic stop data.")
 
@@ -305,6 +306,62 @@ if page == "Dashboard Overview":
         st.bar_chart(country_counts.set_index('country_name')['drug_related_stop_rate'])
     else:
         st.info("No country data to display. Check database data.")
+        
+        
+elif page == "Search Logs":
+    st.header("🔍 Search Traffic Stop Logs")
+    st.write("Filter and search through historical traffic stop records.")
+
+    col1, col2, col3 = st.columns(3)
+    
+    all_countries = ["All"] + fetch_data(f"SELECT DISTINCT country_name FROM {TRAFFIC_STOPS_TABLE} WHERE country_name != 'Unknown' ORDER BY country_name;").iloc[:, 0].tolist()
+    selected_country = col1.selectbox("Filter by Country", all_countries)
+
+    all_genders = ["All"] + fetch_data(f"SELECT DISTINCT driver_gender FROM {TRAFFIC_STOPS_TABLE} WHERE driver_gender != 'Unknown' ORDER BY driver_gender;").iloc[:, 0].tolist()
+    selected_gender = col2.selectbox("Filter by Driver Gender", all_genders)
+
+    vehicle_number_search = col3.text_input("Search by Vehicle Number", "")
+
+    min_date = fetch_data(f"SELECT MIN(stop_date) FROM {TRAFFIC_STOPS_TABLE};").iloc[0,0]
+    max_date = fetch_data(f"SELECT MAX(stop_date) FROM {TRAFFIC_STOPS_TABLE};").iloc[0,0]
+    
+    if min_date and max_date:
+        selected_start_date = st.date_input("Start Date", value=min_date, min_value=min_date, max_value=max_date)
+        selected_end_date = st.date_input("End Date", value=max_date, min_value=min_date, max_value=max_date)
+    else:
+        selected_start_date = st.date_input("Start Date", value=date(2000, 1, 1))
+        selected_end_date = st.date_input("End Date", value=date.today())
+
+    query_parts = [f"SELECT * FROM {TRAFFIC_STOPS_TABLE} WHERE 1=1"]
+    params_list = []
+
+    if selected_country != "All":
+        query_parts.append(f"AND country_name = %s")
+        params_list.append(selected_country)
+    if selected_gender != "All":
+        query_parts.append(f"AND driver_gender = %s")
+        params_list.append(selected_gender)
+    
+    query_parts.append(f"AND stop_date BETWEEN %s AND %s")
+    params_list.append(selected_start_date)
+    params_list.append(selected_end_date)
+
+    if vehicle_number_search:
+        query_parts.append(f"AND vehicle_number LIKE %s")
+        params_list.append(f"%{vehicle_number_search}%")
+
+    search_query = " ".join(query_parts) + f" ORDER BY stop_date DESC, stop_time DESC LIMIT 100;"
+
+    if st.button("Apply Filters and Search"):
+        st.markdown("---")
+        st.subheader("Search Results")
+        search_results_df = fetch_data(search_query, params_list)
+        if not search_results_df.empty:
+            st.dataframe(search_results_df, use_container_width=True)
+            st.success(f"Found {len(search_results_df)} matching records.")
+        else:
+            st.info("No records found matching your criteria.")
+
 
 elif page == "Analytics & Reports":
     st.header("📈 Analytics & Reports")
